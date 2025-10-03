@@ -76,18 +76,21 @@ The requirement that a request for this number of cutouts within 10 seconds is v
 
 A naive version of this service along the lines of:
 
-* make a Butler query of the `visit` dataset type for a the circular cutout region;
+* make a Butler query of the `visit` dataset type for the circular cutout region;
 * call the existing cutout service in parallel for each result using hundreds of workers;
 * collect the resulting FITS images and combines them into a MEF;
 * return the MEF to the caller;
 
 could work, but presumably not within the required time constraints, at least not once a significant number of visits have been acquired.
+Currently the fastest we can do a 100x100 pixel cutout of a co-add (using GCS) is about 0.5s, with visits taking slightly longer (since the WCS is not fixed) but with the caveat that visits will never be hosted at Google after DP1.
 
 ### Catalog-based cutouts
 
-A request for a million cutouts is going to require significant compute and may require a large number of files to be read from the Butler datastore.
+A request for a million cutouts is going to require many cutout jobs and may require a large number of files to be read from the Butler datastore.
 This is inherently an asynchronous request and there is no expectation for the results to be available instantly.
 Compute is available at SLAC (but maybe not very much) and at Google (how much can we spend?).
+
+#### Using BPS
 
 A baseline implementation option discussed previously is to effectively convert the request into an HTCondor BPS submission running on the SLAC SLURM cluster.
 This would look something like:
@@ -104,10 +107,22 @@ This would look something like:
 
 The bulk service can, in theory, query the job status itself using the normal BPS tooling.
 
-An alternative proposal has been to use Google compute.
+#### Using Google with Queues
+
+An alternative proposal has been to use Google compute with a queue system.
 This has the advantage that we can scale to as many nodes as needed to deal with many users requesting billions of cutouts, something that SLAC can not support.
 It does, though, have the downside that it will require that all the image files are copied into Google, which will impact the throughput.
 It may be that we can still utilize the existing pipeline infrastructure given that we have previously run BPS with PanDA on Google as part of Data Preview 0.2 {cite:p}`RTN-041`.
+
+Additionally, we need to decide if we are putting a single job on the queue per catalog row (and so potentially requesting the same file multiple times) or if the queue manager is going to query the Butler and pass a single dataset ref plus subset of rows to the compute job.
+Multiple cutouts per file would change the analysis on whether to try to use Astropy for remote S3 reads vs downloading the entire file.
+Even if the caller is only requesting image data (no mask or variance) once more than 2 or 3 cutouts are requested for a dataset it is more efficient to download the file and cutout from the file than it is is to do remote reads.
+
+One possibility for the large-scale cutout requests is that we do not run the job instantly but wait for other requests to come in.
+It is possible, especially for co-adds, that we might get multiple requests that use the same Butler dataset.
+Combining requests from multiple users into a single cutout job would reduce load on the system at the expense of potential delays and extra book-keeping to make sure each person gets the cutouts they asked for.
+
+Any Google-based system would need to gather the results from the workers and collect them into the desired response format and write them to the output bucket.
 
 ## Conclusion
 
