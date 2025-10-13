@@ -45,13 +45,34 @@ They would have to specify a data release and dataset type and the service would
 The fundamental result from a bulk cutout request consist of, potentially, millions of small FITS files with each containing metadata (including provenance and WCS information), the pixel values and also variance and mask information.[^raws]
 This could be considered to be unwieldy in terms of download performance (many small files are not efficient) and in terms of the huge results message to be generated listing every file.
 
-Other options for the results packaging could be Zip archives or multi-extension FITS (MEF).
+Other options for the results packaging could be Zip archives, data cubes, tables with embedded cutouts, or multi-extension FITS (MEF).
 Each of these options reduce the file count but for the largest batch jobs it's likely that we would want to generate more than one output file to balance file size with file count.
 Cutouts could be grouped evenly across multiple files or they could be collected together by sky tract (effectively a spatial partition).
 
 MEF files have reasonable support in existing tooling but the FITS data model has only limited grouping capabilities and would require the tooling to understand that each `EXTVER` value corresponds to a single cutout.
 A MEF may well be the best option for the specific case of a time-series request at a single coordinate.
 Zip archives would usually be treated as a transport medium with the user unpacking the file as soon as they receive it.
+
+An alternate approach for light-curves is to return a data cube with a spatial slice and a time axis.
+In FITS it's not really possible to have a completely independent absolute-sky-position WCS for each plane in a cube (this is possible using the Starlink AST WCS natively {cite:p}`2016A&C....15...33B` but we have to be FITS standard compliant).
+This is not as trivial as it at first appears as the pixel-preserving cutouts from single-epoch images for even completely stationary objects are not a great match, as every image will have different registration and rotational dithering, so there's no conceivable common WCS for the spatial dimensions of the cube as a whole.
+Even if, again, for the particular application that didn't matter, and there was no spatial WCS and all the cutouts were just aligned on row/column directions, the source would still be at a different sub-pixel position in every plane, and there's no natural place to stash that information in a FITS cube.
+Stationary-object cutouts that are warped to a common pixel map (e.g., `TAN`) with the object at exactly the same pixel position in each epoch do work nicely.
+Observation times can be preserved in a lookup-table time-axis WCS, 100% FITS-standard.
+Moving-object cutouts for stars with proper motions probably are also OK in that format, as for many use cases it's likely to be interesting to see the target move from cutout to cutout against the background objects.
+TAN-warped moving-object cutouts for SSOs are not as good a match, but it is still possible to define a relative WCS for the cube, returning local North/East angular offsets, for instance, reflecting either a differential position from the `DiaSource` position in each individual epoch, or a differential position from the predicted location from the computed orbit; which one to do might best be a user-selectable choice.
+
+A data cube might be useful for returning cutouts from multiple bands from the coadd images.
+These all have the same WCS and so there are no complications in returning cutouts in this form.
+
+An alternative approach to MEF is to return each cutout as a row in a binary table using the Greenbank convention {cite}`FITS:GreenBank`.
+This has the advantage that the image can be embedded with the associated source information, assuming that the user specified a source/object ID and not a position.
+This convention has some issues with SIP WCS with many parameters and we might be required to extend the registered convention.
+Multiple files will be needed once the number of cutouts becomes large.
+
+One approach used by IPAC specifically for light curves is to return VOTable data representing the light curve (obtained from the forced source table for example) along with a column corresponding to a DataLinker request for a cutout.
+Firefly is able to recognize this form and display a handful of cutouts at a time, updating in near-realtime as the user clicks on specific time stamps.
+This works using the existing cutout infrastructure so long as a visit or diffim cutout can be obtained in a fraction of a second.
 
 It's not clear whether we need to integrate bulk cutout requests into Firefly or other VO-capable tooling, and any decision on that may well have an impact on how cutouts are returned.
 
