@@ -31,11 +31,19 @@ There are two variants of what a user might request in terms of bulk cutouts.
 1. A time-series of a single coordinate for a specific `visit`-dimensioned dataset type.
 2. A catalog containing many target coordinates with a request for cutouts of a specified size for each target for a specific dataset type.
 
-It is conceivable that these two variants are distinct services and they could also have completely different implementations.
+It is also possible to consider a special case of requesting a cutout of a single location from a co-add in all the available wavebands.
+For a single coordinate, this is closer to the time-series interface than the catalog interface.
 
-A time-series request where a single coordinate can return a single image, might be possible using a standard SODA interface much like the existing cutout service, with the addition of a dataset type parameter.
+In this context solar system objects are, from a user perspective, closer to a time-series request than a bulk cutout catalog request.
+Internally there is added complication due to having to match up the solar system object to specific butler datasets.
+
+There is no reason why the two variants have to be the same implementation.
+
+A time-series request where a single coordinate can return a single file, might be possible using a standard SODA interface much like the existing cutout service, with the addition of a dataset type parameter.
 The data release could either be specified using an additional parameter or there could be different endpoints for each data release.
 A key difference from the existing cutout service being that the service itself would have to find the datasets rather than being sent an explicit UUID.
+An alternate approach is to return a table, similar to how SIA works, with the time series (or co-add waveband) parameters along with data link columns referring to the existing single-cutout service.
+This would allow for on-demand cutouts as usually displayed by a GUI tool.
 
 The more complex bulk service would receive a catalog from the user, possibly supporting a variety of formats (Parquet, CSV, VOTable) containing ICRS RA and Dec coordinates.
 They would have to specify a data release and dataset type and the service would inherently be asynchronous and would have to conform to the IVOA Universal Worker Service (UWS) standard {cite:p}`2016ivoa.spec.1024H` to let the user know when their job has completed and where the resulting files will be located.
@@ -50,10 +58,10 @@ Each of these options reduce the file count but for the largest batch jobs it's 
 Cutouts could be grouped evenly across multiple files or they could be collected together by sky tract (effectively a spatial partition).
 
 MEF files have reasonable support in existing tooling but the FITS data model has only limited grouping capabilities and would require the tooling to understand that each `EXTVER` value corresponds to a single cutout.
-A MEF may well be the best option for the specific case of a time-series request at a single coordinate.
+For large MEF files they are also inefficient to access given the lack of indexing facilities in FITS.
 Zip archives would usually be treated as a transport medium with the user unpacking the file as soon as they receive it.
 
-An alternate approach for light-curves is to return a data cube with a spatial slice and a time axis.
+Another approach for light-curves is to return a data cube with a spatial slice and a time axis.
 In FITS it's not really possible to have a completely independent absolute-sky-position WCS for each plane in a cube (this is possible using the Starlink AST WCS natively {cite:p}`2016A&C....15...33B` but we have to be FITS standard compliant).
 This is not as trivial as it at first appears as the pixel-preserving cutouts from single-epoch images for even completely stationary objects are not a great match, as every image will have different registration and rotational dithering, so there's no conceivable common WCS for the spatial dimensions of the cube as a whole.
 Even if, again, for the particular application that didn't matter, and there was no spatial WCS and all the cutouts were just aligned on row/column directions, the source would still be at a different sub-pixel position in every plane, and there's no natural place to stash that information in a FITS cube.
@@ -82,17 +90,36 @@ For co-added data which is warped onto a standard sky map, the pipeline processi
 This implies that so long as cutout requests for co-adds are smaller than 200 pixels there is never a need to read in multiple input images to generate a cutout.
 
 For visit images the key question is whether there is an expectation for the cutout to cross a detector boundary and include data from adjacent detectors.
-It may be prudent to disallow this in the first version and return individual cutouts from each detector.
+It may be prudent to disallow this in the first version and return individual cutouts from each detector --- a cutout service that can cross boundaries can no longer be given an explicit IVOID {cite:p}`DMTN-302` for a Butler dataset (as used by the current cutout service) but must query the Butler itself, do the cutout from each (up to four) image, and resample and combine the small cutouts.
 There is an implicit assumption that the visit/detector regions defined in the butler have been recalculated to reflect the final astrometric calibration as part of a data release.
 Prompt products might not be able to have this correction applied.
+
+Lossy-compressed visit images are now expected to be part of a formal data release but difference images are expected to be created on demand.
+This makes them effectively unusable in a fast cutout service retrieving light curve images but would not necessarily be a problem for catalog-driven bulk cutouts.
 
 ## Implementation
 
 We will initially consider the time-series cutout to be distinct from the catalog-based cutout (if someone wants time-series cutouts at multiple locations that is simply the catalog-based cutout service with visit images but where the resulting packaging of results might require the user to do some book keeping to put things back together for each coordinates).
 
+### Time-series on-demand
+
+A service to return the results in a table with deferred cutouts would need to:
+
+* Take an Object ID as parameter, and optional cutout size.
+* Use the TAP service to return the forced source (or multi-band Object data).
+* Determine the Butler data IDs corresponding to each result.
+* Retrieve the UUIDs from the Butler for those data IDs.
+* Form the IVOIDs for those datasets.
+* Construct a VOTable with the TAP results and the data linker URL for the cutout service.
+* Return the table.
+
+For time-series the difference images and visit images could be returned as different columns or the user could specify the dataset type explicitly.
+This assumes that these dataset types are part of a data release.
+
 ### Time-Series cutout
 
 At the end of Data Release 10 the plan is for there to be more than 800 visits to each part of the survey region.
+Deep-drilling fields will have far more visits than that.
 The requirement that a request for this number of cutouts within 10 seconds is very challenging given that it can currently take a few seconds for an RSP user on Google to retrieve a single image from the Butler.
 
 A naive version of this service along the lines of:
@@ -104,6 +131,8 @@ A naive version of this service along the lines of:
 
 could work, but presumably not within the required time constraints, at least not once a significant number of visits have been acquired.
 Currently the fastest we can do a 100x100 pixel cutout of a co-add (using GCS) is about 0.5s, with visits taking slightly longer (since the WCS is not fixed) but with the caveat that visits will never be hosted at Google after DP1.
+
+If it is also necessary to include source parameters for light-curve plotting in tabular form there will have to be an additional query to Qserv, as detailed in the previous section, along with explicit data ID driven Butler queries.
 
 ### Catalog-based cutouts
 
