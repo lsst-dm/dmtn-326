@@ -56,6 +56,7 @@ This could be considered to be unwieldy in terms of download performance (many s
 Other options for the results packaging could be Zip archives, data cubes, tables with embedded cutouts, or multi-extension FITS (MEF).
 Each of these options reduce the file count but for the largest batch jobs it's likely that we would want to generate more than one output file to balance file size with file count.
 Cutouts could be grouped evenly across multiple files or they could be collected together by sky tract (effectively a spatial partition).
+The community is also requesting cutouts in Zarr format {cite:p}`10.5281/zenodo.3773449` and both FITS and Zarr are supported by the new Cutana tool {cite:p}`2025arXiv251104429G`.
 
 MEF files have reasonable support in existing tooling but the FITS data model has only limited grouping capabilities and would require the tooling to understand that each `EXTVER` value corresponds to a single cutout.
 For large MEF files they are also inefficient to access given the lack of indexing facilities in FITS.
@@ -140,6 +141,8 @@ A request for a million cutouts is going to require many cutout jobs and may req
 This is inherently an asynchronous request and there is no expectation for the results to be available instantly.
 Compute is available at SLAC (but maybe not very much) and at Google (how much can we spend?).
 
+A key question here is whether we try to reuse the pipeline middleware infrastructure that we already use for data releases (involving a bespoke graph builder for BPS {cite:p}`2025ASPC..538..325G` and an after burner that packages the files) or we use a Kubernetes native system as a scaled up implementation of the existing cutout service.
+
 #### Using BPS
 
 A baseline implementation option discussed previously is to effectively convert the request into an HTCondor BPS submission running on the SLAC SLURM cluster.
@@ -176,7 +179,12 @@ Any Google-based system would need to gather the results from the workers and co
 
 ## Conclusion
 
-TBD.
+To get some form of cutout service to the computer in the shortest time the plan is:
+
+1. Develop a on-demand time-series cutout service.
+   This will require that we can get the standard cutout service working with sub-second performance.
+2. Develop the time-series service with the cutouts embedded in a FITS binary table.
+3. Implement bulk cutouts using an undecided method.
 
 ## References
 
