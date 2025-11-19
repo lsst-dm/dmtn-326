@@ -139,7 +139,7 @@ If it is also necessary to include source parameters for light-curve plotting in
 
 A request for a million cutouts is going to require many cutout jobs and may require a large number of files to be read from the Butler datastore.
 This is inherently an asynchronous request and there is no expectation for the results to be available instantly.
-Compute is available at SLAC (but maybe not very much) and at Google (how much can we spend?).
+Compute is available at SLAC (but maybe not very much) and at Google (how much can we spend and can SLAC networking to Google support the requests at scale?).
 
 A key question here is whether we try to reuse the pipeline middleware infrastructure that we already use for data releases (involving a bespoke graph builder for BPS {cite:p}`2025ASPC..538..325G` and an after burner that packages the files) or we use a Kubernetes native system as a scaled up implementation of the existing cutout service.
 
