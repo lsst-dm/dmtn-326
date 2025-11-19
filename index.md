@@ -177,6 +177,14 @@ Combining requests from multiple users into a single cutout job would reduce loa
 
 Any Google-based system would need to gather the results from the workers and collect them into the desired response format and write them to the output bucket.
 
+#### Use a Third-party Tool
+
+It is conceivable that if we find that small WCS errors caused from using a SIP approximation are acceptable when doing cutouts, we could make use of an existing cutout tool such as Cutana {cite:p}`2025arXiv251104429G`.
+There would have to be tooling in front of Cutana to convert the user request to something understandable by Cutana given that the Butler would have to be queried to find the locations of the FITS files and assigning cutout requests to each file.
+The source code for Cutana is not yet available to the community so it is not yet clear whether butler could be integrated directly into the software.
+
+For visit requests crossing detector boundaries we would likely have to return multiple cutouts and require the end user deal with any mosaicking.
+
 ## Conclusion
 
 To get some form of cutout service to the computer in the shortest time the plan is:
