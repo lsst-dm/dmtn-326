@@ -21,3 +21,19 @@ orcid = "https://orcid.org/0000-0001-5982-167X"
 name = "Vera C. Rubin Observatory Project Office"
 internal_id = "RubinObs"
 address = "Tucson"
+[[technote.authors]]
+name = {given = "Gregory P.", family = "Dubois-Felsmann"}
+internal_id = "duboisfelsmanngp"
+orcid = "https://orcid.org/0000-0003-1598-6979"
+[[technote.authors.affiliations]]
+name = "California Institute of Technology"
+internal_id = "IPAC"
+ror = "https://ror.org/05q79g396"
+[[technote.authors]]
+name = {given = "James F.", family = "Bosch"}
+internal_id = "boschjf"
+orcid = "https://orcid.org/0000-0003-2759-5764"
+[[technote.authors.affiliations]]
+name = "Princeton University"
+internal_id = "Princeton-Astro"
+ror = "https://ror.org/00hx57361"
