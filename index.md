@@ -108,7 +108,7 @@ For small numbers of cutouts this format is acceptable.
 The Greenbank convention {cite}`FITS:GreenBank` stores cutouts in FITS binary tables.
 This has the advantage that the image can be embedded with the associated source information, assuming that the user specified a source/object ID and not a position.
 This convention has some issues with SIP WCS with many parameters and we might be required to extend the registered convention unless we recalculated the WCS for the smaller area.
-We need to investigate how many rows can be stored in one of these files before they become to large to be used efficiently, and we need to understand the current situation with tooling that understands how to read and display these files.
+We need to investigate how many rows can be stored in one of these files before they become too large to be used efficiently, and we need to understand the current situation with tooling that understands how to read and display these files.
 
 ##### Multimodal Universe HDF5
 
@@ -126,7 +126,7 @@ Given that the data model used for writing to MMU HDF5 would be very similar to 
 
 At its simplest the outputs from a bulk object catalog cutout request would be FITS files for every catalog position and every band with each file containing the image pixels, the variance, the mask, and a PSF image as well as provenance and inherited metadata.
 We are not expecting to support raw data cutouts.
-For millions of cutouts this number of files are difficult to manage at USDF and essentially impossible for an end user to download and manage.
+For millions of cutouts this number of files would be difficult to manage at USDF and essentially impossible for an end user to download and manage.
 
 We therefore need to come up with a scheme where multiple cutouts are combined into files using some kind of partitioning.
 Given the potential
