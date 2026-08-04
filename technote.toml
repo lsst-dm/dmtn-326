@@ -5,6 +5,7 @@ canonical_url = "https://dmtn-326.lsst.io"
 github_url = "https://github.com/lsst-dm/dmtn-326"
 github_default_branch = "main"
 date_created = 2025-09-26T21:29:51Z
+doi = "https://doi.org/10.71929/rubin/3399549"
 organization.name = "NSF-DOE Vera C. Rubin Observatory"
 organization.ror = "https://ror.org/048g3cy84"
 license.id = "CC-BY-4.0"
