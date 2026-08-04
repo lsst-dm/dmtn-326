@@ -5,6 +5,8 @@ The bulk cutout service is a deliverable required to support Data Preview 2.
 This document explains our implementation options regarding how to perform the cutouts at scale and in what form the resulting cutouts should be returned.
 ```
 
+DOI: [doi:10.71929/rubin/3399549](https://doi.org/10.71929/rubin/3399549)
+
 ## Introduction
 
 The existing one-at-a-time cutout service {cite:p}`DMTN-208` was deployed for Data Preview 1 {cite:p}`RTN-095` and uses the IVOA SODA (Server-side Operations for Data Access) standard {cite:p}`2017ivoa.spec.0517B`.
@@ -12,8 +14,8 @@ This service is generally called via DataLinker with results from SIA or ObsTAP 
 
 The community are very keen on being able to retrieve millions of small image cutouts from LSST images and we have had explicit inquiries from the LINCC team over the years asking us how they would obtain billions of cutouts.
 In {cite:t}`DMTN-207` an initial discussion was begun concerning how the EPO team would generate their Zooniverse cutouts at scale but that discussion faltered, due to other priorities, and the EPO team started to try to use the Butler directly in a loop (which has serious performance issues).
-Additionally we have seen demand from Data Preview 1 {cite:p}`RTN-095` users where people have been calling into the existing one-at-a-time cutout service over many days to obtain cutouts for ML training data.
-Formally we have agreed to release some form of bulk cutout service in time for Data Preview 2.
+Additionally we have seen demand from Data Preview 1 {cite:p}`RTN-095,2026AJ....171..360V` users where people have been calling into the existing one-at-a-time cutout service over many days to obtain cutouts for ML training data.
+Formally we have agreed to release some form of bulk cutout service in time for Data Preview 2 {cite:p}`RTN-115`.
 
 ## Requirements
 
