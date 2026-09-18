@@ -14,14 +14,14 @@ license.id = "CC-BY-4.0"
 state = "draft"
 
 [[technote.authors]]
-name.given = "Tim"
-name.family = "Jenness"
 internal_id = "jennesst"
 orcid = "https://orcid.org/0000-0001-5982-167X"
+name = {given = "Tim", family = "Jenness"}
 [[technote.authors.affiliations]]
-name = "Vera C. Rubin Observatory Project Office"
+name = "NSF-DOE Vera C. Rubin Observatory / NSF NOIRLab"
 internal_id = "RubinObs"
 address = "Tucson"
+ror = "https://ror.org/048g3cy84"
 [[technote.authors]]
 name = {given = "Gregory P.", family = "Dubois-Felsmann"}
 internal_id = "duboisfelsmanngp"
