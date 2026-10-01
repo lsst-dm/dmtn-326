@@ -111,6 +111,11 @@ MEF is well supported in display tools for looking at individual images and you 
 File access of multiple cutouts is not efficient and tooling has to understand how to group each extension based on the `EXTVER` and `EXTNAME` FITS headers.
 For small numbers of cutouts this format is acceptable.
 
+##### HDF5 or Zarr
+
+An alternative to using FITS is to store the binary data as large n-dimensional arrays using a common format such as HDF5 or Zarr.{cite:p}`10.5281/zenodo.3773449`
+This would require us to investigate existing data models since these formats are not common within astronomy.
+
 ##### Greenbank Convention Binary Tables
 
 The Greenbank convention {cite}`FITS:GreenBank` stores cutouts in FITS binary tables.
@@ -118,17 +123,15 @@ This has the advantage that the image can be embedded with the associated source
 This convention has some issues with SIP WCS with many parameters and we might be required to extend the registered convention unless we recalculated the WCS for the smaller area.
 We need to investigate how many rows can be stored in one of these files before they become too large to be used efficiently, and we need to understand the current situation with tooling that understands how to read and display these files.
 
-##### Multimodal Universe HDF5
+##### Multimodal Universe Parquet
 
 The [Multimodal Universe](https://github.com/MultimodalUniverse/MultimodalUniverse) project (MMU) is collecting datasets from different instruments in a form that makes it easy to use them when training Machine Learning models.
-Data files in the MMU are stored in HDF5 format and each instrument is expected to provide some Python tooling to be able to read those files into the system in a standard way.
-They currently have datasets from HSC which provides some guidance for how we should layout our files but they do not have any light-curve examples that include cutouts (the light-curve examples are using catalog photometry data).
-Nevertheless, it seems like there is a straightforward way to combine the HSC approach (for a Rubin proposed format see [the Appendix](#multimodal-universe-file-format)) with the DES/PS1 light-curve approach (one HDF5 file per light-curve).
+Initially MMU stored data in HDF5 format with image, variance, and mask cutouts stored as 4-dimensional arrays (2D cutouts for each band) along with tabular data as individual columns.
+Recently they switched to Parquet format using HATS partitioning {cite:p}`IVOAHATS` where the binary image, variance, and mask data are stored in Parquet columns.
 
-The HDF5 approach requires that cutouts be stored in data cubes with tabular data describing each cutout (such as the time and the band and any WCS approximations).
+They currently have datasets from HSC which provides some guidance for how we should layout our files and what metadata columns are expected, but they do not have any light-curve examples that include cutouts (the light-curve examples are using catalog photometry data).
+Nevertheless, it seems like there is a straightforward way to combine the HSC approach with the DES/PS1 light-curve approach (one file per light-curve).
 We would have to clarify whether there is an expectation that each cutout would be resampled into the same WCS grid.
-
-Given that the data model used for writing to MMU HDF5 would be very similar to what we would be using for Zarr {cite:p}`10.5281/zenodo.3773449`, it would be straightforward to support both Zarr and HDF5.
 
 #### Catalog Cutout Data
 
@@ -152,7 +155,6 @@ A Multi-extension FITS file containing four or five HDUs per cutout seems fundam
 The Greenbank table extension may also not be suitable.
 These FITS options *might* work if we explicitly capped the number of cutouts we store per file, at the expense of creating many more files.
 
-The MMU approach of storing the cutouts in N-dimensional arrays seems like the best solution and we can build on the basic data model outlined in [the Appendix](#multimodal-universe-file-format) for HDF5, Zarr, and FITS variants, storing the important WCS and associated information in tables.
 We can also include the Greenbank columns in tabular form (or as discrete 1-D arrays) such that we are able to specify band and WCS in a form that is already documented even if the pixel data is no longer in the table.
 For visit-based FITS cubes it is acceptable to include the time of observation in the WCS as a lookup table, and for coadd cubes we can store the nominal wavelength of the filters in the WCS.
 Most FITS libraries should be able to read FITS HDUs with more than 2 billion pixels (32-bit signed int), although I'm not sure if we have tested `lsst.afw.image` with that scale of data.
@@ -164,8 +166,9 @@ Conceptually, from a data modeling perspective the file options described above 
 1. A collection of discrete images.
 2. Tabular data where a row corresponds to a cutout.
 
-When N becomes high the only efficient approach is to think of the data as tabular, whether that is a single FITS binary tables containing everything or multiple hypercubes representing the pixel data indexed by cutout number along with associated metadata tables representing the cutout coordinates or time.
+When N becomes high the only efficient approach is to think of the data as tabular, whether that is a single FITS binary table containing everything or multiple hypercubes representing the pixel data indexed by cutout number along with associated metadata tables representing the cutout coordinates or time.
 The actual serialized format (FITS, Zarr, HDF5, Parquet) does not matter as much as deciding to adopt tabular form as the baseline.
+The MMU approach of storing the cutouts in N-dimensional arrays seems like the best solution and we can build on their basic data model.
 
 ## Constraints
 
@@ -282,124 +285,3 @@ To get some form of cutout service to the community in the shortest time the pla
 
 ```{bibliography}
 ```
-
-## Appendix
-
-(multimodal-universe-file-format)=
-### MultiModal Universe File Format
-
-Version: 1.0 (draft) \
-Scope: Multiband coadd postage stamps with PSF, variance, and masks \
-Compatibility target: MultiModalUniverse (HSC-style datasets)
-
-The default design follows what is currently being used for HSC datasets.
-Time-series datasets in MMU are currently single catalog value light-curves and are not image based.
-We could design our own extension to this format to support a time axis with the one constraint being that light-curve MMU datasets have one file per object and are named after the object ID.
-
-#### Overview
-
-This specification defines an HDF5 file format for storing multiband image cutouts extracted from Rubin Observatory coadd images.
-
-Each file contains multiple astronomical objects.
-Each object includes:
-
-- Aligned cutouts in multiple bands
-- Variance and mask images
-- PSF models for each cutout
-- Catalog metadata giving at least the RA/Dec position of each cutout.
-
-The format is designed to:
-
-- Support efficient array-based access
-- Allow deterministic export to MultiModalUniverse (MMU)
-
-#### File Organization
-
-##### Directory Layout
-
-MMU requires that files SHOULD be partitioned by HEALPix:
-
-```
-rubin_deep_coadds/
-  healpix=XXXX/
-    part-0000.hdf5
-    part-0001.hdf5
-```
-
-##### Top-Level Structure
-
-Each HDF5 file MUST contain:
-
-```
-/
-├── meta/
-├── catalog/
-└── images/
-```
-
-MMU itself does not care directly about the file layouts, only requiring that each instrument provides some loader code that can read the contents in using a standard API.
-
-#### Metadata Group (/meta)
-
-##### Required Datasets
-
-```
-/meta/survey                "LSST"
-/meta/instrument            "LSSTCam"
-/meta/release               string
-/meta/product               "deep_coadd_cutouts"
-/meta/schema_version        "1.0"
-/meta/healpix_nside_catalog int
-/meta/healpix_ordering      "nested"
-```
-
-##### Band and Geometry
-
-```
-/meta/band_order            ["u","g","r","i","z","y"]
-/meta/image_shape           [Ny, Nx]
-/meta/psf_shape             [Py, Px]
-```
-
-The shapes are duplicated here (they are known from the HDF5 structure) to provide a quick way to read the information and to provide internal conformance.
-
-#### Catalog Group (/catalog)
-
-##### Required Fields
-
-```
-/catalog/object_id
-/catalog/ra
-/catalog/dec
-/catalog/healpix
-```
-
-where the HEALPix NSIDE is specified in the `/meta/` group.
-In theory we could also store MOCs of the cutouts, although that can become quite complicated.
-HSC includes additional information obtained from the catalog products.
-Including that information would require additional queries to Qserv or reads of the equivalent Butler parquet files.
-
-#### Image Data Group (/images)
-
-For N objects cut out from Nb bands:
-
-```
-/images/band                (N, Nb)
-/images/flux                (N, Nb, Ny, Nx)
-/images/variance            (N, Nb, Ny, Nx)
-/images/mask                (N, Nb, Ny, Nx)
-/images/psf                 (N, Nb, Py, Px)
-/images/psf_fwhm            (N, Nb)
-/images/pixel_scale         (N, Nb)
-```
-
-The `/images/band` and `/images/pixel_scale` are there for consistency with the underlying HSC example for the MMU files even though we can assume the band order for each object and can assume the pixel scale is constant.
-We can drop them from our format and move them to constants in the `/meta` section.
-
-MMU prefers inverse variance so we do have to decide if we store that directly or have to write a mapping for MMU import.
-
-| Rubin | MMU |
-|------|-----|
-| flux | image_array |
-| variance | image_ivar |
-| band | image_band |
