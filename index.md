@@ -3,6 +3,7 @@
 ```{abstract}
 The bulk cutout service is a deliverable required to support Data Preview 2.
 This document explains our implementation options regarding how to perform the cutouts at scale and in what form the resulting cutouts should be returned.
+It distinguishes bulk cutout of objects or sources specified in a catalog, from bulk cutout of light curves for a single object.
 ```
 
 DOI: [doi:10.71929/rubin/3399549](https://doi.org/10.71929/rubin/3399549)
@@ -25,6 +26,19 @@ There is one formal requirement listed in LSE-61 {cite:p}`LSE-61` relating to bu
 
   > Postage stamp cutouts, of size **postageStampSize** \[51 pixels] square, of all observations of a single Object shall be retrievable within **postageStampRetrievalTime** \[10 seconds], with **postageStampRetrievalUsers** \[10] simultaneous requests of distinct Objects.
 
+## Existing Cutout Services
+
+There are some existing services that support requests for cutouts of multiple targets:
+
+* [PANSTARRS](https://outerspace.stsci.edu/spaces/PANSTARRS/pages/298812251/PS1+Image+Cutout+Service) talks about user uploads of 1,000 catalog positions taking less than 2 seconds and implies one file per cutout.
+* [TESSCut](https://mast.stsci.edu/tesscut/) supports object and moving target cutout requests with a maximum cutout area of 10,000 pixels for time-series data, returning the results in a Zip of FITS files.
+* The [IRSA Cutout Service](https://irsa.ipac.caltech.edu/applications/Cutouts/) implies that multiple cutouts are returned in a tar file.
+* The [ESO Archive Science Portal](https://support.eso.org/en-US/kb/articles/asp-cut-out-service) cutout service has an example where two coordinates are uploaded and then two files are downloaded individually or in a Zip.
+* [Cirada](http://cutouts.cirada.ca/help/#batch-example) has a batch mode that downloads results as PNG files in a gzipped tar file.
+* The [CADC MegaPipe](https://www4.cadc.hia.nrc.gc.ca/en/megapipe/access/cut.html?) service returns the cutouts from each band for a single object individually.
+* The [DESI Legacy Imaging Survey](https://www.legacysurvey.org) cutout service can return images for a single coordinate from multiple bands in a Multi-Extension FITS file.
+
+There is also the Cutana {cite:p}`2025arXiv251104429G` application although that system processes one file at a time as provided to it by some other service.
 
 ## Interface
 
@@ -47,45 +61,86 @@ A key difference from the existing cutout service being that the service itself 
 An alternate approach is to return a table, similar to how SIA works, with the time series (or co-add waveband) parameters along with data link columns referring to the existing single-cutout service.
 This would allow for on-demand cutouts as usually displayed by a GUI tool.
 
-The more complex bulk service would receive a catalog from the user, possibly supporting a variety of formats (Parquet, CSV, VOTable) containing ICRS RA and Dec coordinates.
+The more complex bulk object cutout service would receive a catalog from the user, possibly supporting a variety of formats (Parquet, CSV, VOTable) containing ICRS RA and Dec coordinates.
 They would have to specify a data release and dataset type and the service would inherently be asynchronous and would have to conform to the IVOA Universal Worker Service (UWS) standard {cite:p}`2016ivoa.spec.1024H` to let the user know when their job has completed and where the resulting files will be located.
 
 ### Returned Data
 
-The fundamental result from a bulk cutout request consist of, potentially, millions of small FITS files with each containing metadata (including provenance and WCS information), the pixel values and also variance and mask information.[^raws]
-This could be considered to be unwieldy in terms of download performance (many small files are not efficient) and in terms of the huge results message to be generated listing every file.
+Regardless of which cutout mode is used, from a data modeling perspective the results of a cutout service are small images (all the same size) with variance and mask planes, and associated metadata describing the WCS, time, and wavelength of the cutout.
+This is conceptually tabular data and there are many ways to represent this data in memory and in files.
 
-Other options for the results packaging could be Zip archives, data cubes, tables with embedded cutouts, or multi-extension FITS (MEF).
-Each of these options reduce the file count but for the largest batch jobs it's likely that we would want to generate more than one output file to balance file size with file count.
-Cutouts could be grouped evenly across multiple files or they could be collected together by sky tract (effectively a spatial partition).
-The community is also requesting cutouts in Zarr format {cite:p}`10.5281/zenodo.3773449` and both FITS and Zarr are supported by the new Cutana tool {cite:p}`2025arXiv251104429G`.
+One recent development in this area is the creation of the new `images` package for the LSST Science Pipelines {cite:p}`DMTN-339` that enables a clean separation between the data model and the file serialization format.
+This could potentially give us the flexibility to define cutout container models for light curves, co-add filter cutouts, and bulk object cutouts, and defer the shipped file format until later (and give people options based on their needs).
 
-MEF files have reasonable support in existing tooling but the FITS data model has only limited grouping capabilities and would require the tooling to understand that each `EXTVER` value corresponds to a single cutout.
-For large MEF files they are also inefficient to access given the lack of indexing facilities in FITS.
-Zip archives would usually be treated as a transport medium with the user unpacking the file as soon as they receive it.
+The naive simplest in-memory representation of cutouts is a list of `lsst.images.MaskedImage` objects.
+This would trivially convert to a multi-extension FITS file that would be the default expectation of an astronomer asking for a few tens of cutouts.
+For large numbers of cutouts the format is unwieldy in terms of trying to match up the mask with the associated image data since FITS does not provide any default structure for the output files (unlike what is possible in an HDF5 file).
 
-Another approach for light-curves is to return a data cube with a spatial slice and a time axis.
-In FITS it's not really possible to have a completely independent absolute-sky-position WCS for each plane in a cube (this is possible using the Starlink AST WCS natively {cite:p}`2016A&C....15...33B` but we have to be FITS standard compliant).
-This is not as trivial as it at first appears as the pixel-preserving cutouts from single-epoch images for even completely stationary objects are not a great match, as every image will have different registration and rotational dithering, so there's no conceivable common WCS for the spatial dimensions of the cube as a whole.
-Even if, again, for the particular application that didn't matter, and there was no spatial WCS and all the cutouts were just aligned on row/column directions, the source would still be at a different sub-pixel position in every plane, and there's no natural place to stash that information in a FITS cube.
-Stationary-object cutouts that are warped to a common pixel map (e.g., `TAN`) with the object at exactly the same pixel position in each epoch do work nicely.
-Observation times can be preserved in a lookup-table time-axis WCS, 100% FITS-standard.
-Moving-object cutouts for stars with proper motions probably are also OK in that format, as for many use cases it's likely to be interesting to see the target move from cutout to cutout against the background objects.
-TAN-warped moving-object cutouts for SSOs are not as good a match, but it is still possible to define a relative WCS for the cube, returning local North/East angular offsets, for instance, reflecting either a differential position from the `DiaSource` position in each individual epoch, or a differential position from the predicted location from the computed orbit; which one to do might best be a user-selectable choice.
+An alternate option would be a new cutouts class that stores the image, variance, and mask pixel data in a 3D cube and then has tabular data containing the associated cutout metadata.
+This would naturally translate to a Parquet file such as that used by the [Multimodal Universe](https://github.com/MultimodalUniverse/MultimodalUniverse) {cite}`2024RNAAS...8..301A` (MMU) or else a FITS binary table model such as that use by the Greenbank convention binary tables in FITS {cite}`FITS:GreenBank`.
+In both cases there is an issue with file sizes in that FITS binary tables do not do compression and the standard Parquet compression algorithms do not work well for floating point image data.
+We can also write out files in pseudo tabular form with the pixel data being stored as standard 3-D data arrays and then the tabular metadata stored as tables or multiple 1-D arrays -- a natural layout for an HDF5 file or a Zarr file.{cite:p}`10.5281/zenodo.3773449`
 
-A data cube might be useful for returning cutouts from multiple bands from the coadd images.
-These all have the same WCS and so there are no complications in returning cutouts in this form.
+Using `lsst-images` should give us some flexibility with respect to the output file format, with the only two variants having any pre-existing community support being MMU Parquet abd multi-extension FITS.
 
-An alternative approach to MEF is to return each cutout as a row in a binary table using the Greenbank convention {cite}`FITS:GreenBank`.
+#### Existing File Formats
+
+We can conceive of the file format for returning light-curve cutouts not being the same as what we use for bulk cutouts.
+
+##### Greenbank Convention Binary Tables
+
+The Greenbank convention {cite}`FITS:GreenBank` stores cutouts in FITS binary tables.
 This has the advantage that the image can be embedded with the associated source information, assuming that the user specified a source/object ID and not a position.
-This convention has some issues with SIP WCS with many parameters and we might be required to extend the registered convention.
-Multiple files will be needed once the number of cutouts becomes large.
+This convention has some issues with SIP WCS with many parameters and we might be required to extend the registered convention unless we recalculated the WCS for the smaller area.
+We need to investigate how many rows can be stored in one of these files before they become too large to be used efficiently, and we need to understand the current situation with tooling that understands how to read and display these files.
+An additional problem is that storing 2-D pixel data in a binary table results in no ability to use compression.
+Also, FITS binary tables use row storage and not column storage so there is no efficient way to extract all the pixel data.
 
-One approach used by IPAC specifically for light curves is to return VOTable data representing the light curve (obtained from the forced source table for example) along with a column corresponding to a DataLinker request for a cutout.
-Firefly is able to recognize this form and display a handful of cutouts at a time, updating in near-realtime as the user clicks on specific time stamps.
-This works using the existing cutout infrastructure so long as a visit or diffim cutout can be obtained in a fraction of a second.
+##### Multimodal Universe Parquet
 
-It's not clear whether we need to integrate bulk cutout requests into Firefly or other VO-capable tooling, and any decision on that may well have an impact on how cutouts are returned.
+The [Multimodal Universe](https://github.com/MultimodalUniverse/MultimodalUniverse) project (MMU) is collecting datasets from different instruments in a form that makes it easy to use them when training Machine Learning models.
+Initially MMU stored data in HDF5 format with image, variance, and mask cutouts stored as 4-dimensional arrays (2D cutouts for each band) along with tabular data as individual columns.
+Recently they switched to Parquet format using HATS partitioning {cite:p}`IVOAHATS` where the binary image, variance, and mask data are stored in Parquet columns.
+
+They currently have datasets from HSC which provides some guidance for how we should layout our files and what metadata columns are expected, but they do not have any light-curve examples that include cutouts (the light-curve examples are using catalog photometry data).
+Nevertheless, it seems like there is a straightforward way to combine the HSC approach with the DES/PS1 light-curve approach (one file per light-curve).
+We would have to clarify whether there is an expectation that each cutout would be resampled into the same WCS grid.
+There is also the issue that none of the standard column compression algorithms for Parquet work well with floating point images so there will not be much compression available.
+
+#### Light-Curve Data
+
+Cutouts for a light curve of a single Object can be returned in a single file since even for a deep-drilling-field object after the 10 years of operations we are only talking about tens of thousands of cutouts.
+Without resampling the cutouts the spatial WCS of each cutout is not the same because each cutout comes from a different part of the focal plane and is subject to different distortions with the object in question not being centered in the same place in every cutout pixel.
+
+This would likely require we calculated an approximate linear spatial WCS for each cutout and dropped some of the more Rubin-specific FITS metadata from the output files.
+One downside of this approach is that since each cutout has its own WCS anyone who is visualizing the data cube itself will see the source move around and might wonder if that's bad astrometry.
+The co-add cutouts will share a fixed grid for all wavelengths and so will not have this issue.
+
+#### Catalog Cutout Data
+
+At its simplest the outputs from a bulk object catalog cutout request would be FITS files for every catalog position and every band with each file containing the image pixels, the variance, the mask, and a PSF image as well as provenance and inherited metadata.
+We are not expecting to support raw data cutouts.
+For millions of cutouts this number of files would be difficult to manage at USDF and essentially impossible for an end user to download and manage.
+
+We therefore need to come up with a scheme where multiple cutouts are combined into files using some kind of partitioning.
+
+For deep coadd data we grid the data into a fixed sky map that consists of "tracts" that are split into "patches" with some overlap.
+The batched output products would naturally be written at the tract level, potentially splitting into chunks if there are too many cutouts, or at the patch level, although for the patch level there is a potential to end up with very unbalanced file sizes if one patch only has a couple of cutouts but another crowded area had tens of thousands.
+Downstream users may well want the outputs partitioned into HEALPix, necessitating a post-processing after cutout extraction, something that we might want to avoid.
+
+For visit-based data the WCS varies for each cutout and if multiple detectors cover the cutout area some resampling will be required or else we include the partial cutouts.
+So long as we include accurate WCS it is likely better to allow end-users to do resampling and mosaicking if they need it rather than attempting to deal with detector boundaries.
+Additionally there is no guarantee of a matching number of cutouts for each band so the band and timestamp would have to be specified for every cutout.
+
+For catalog cutouts the sheer scale of the potential number of cutouts does drive us towards a file format solution where the data can be compressed efficiently with minimal overhead for metadata, and where we can generate files of a reasonable size whilst trying to minimize the file count.
+
+A Multi-extension FITS file containing four or five HDUs per cutout seems fundamentally unsuitable for storing tens of thousands of cutouts even if we added the HDU index extension that we are developing for the new visit image FITS format.
+The Greenbank table extension may also not be suitable.
+These FITS options *might* work if we explicitly capped the number of cutouts we store per file, at the expense of creating many more files.
+
+We can also include the Greenbank columns in tabular form (or as discrete 1-D arrays) such that we are able to specify band and WCS in a form that is already documented even if the pixel data is no longer in the table.
+For visit-based FITS cubes it is acceptable to include the time of observation in the WCS as a lookup table, and for coadd cubes we can store the nominal wavelength of the filters in the WCS.
+Most FITS libraries should be able to read FITS HDUs with more than 2 billion pixels (32-bit signed int), although I'm not sure if we have tested `lsst.afw.image` with that scale of data.
 
 ## Constraints
 
@@ -97,14 +152,28 @@ It may be prudent to disallow this in the first version and return individual cu
 There is an implicit assumption that the visit/detector regions defined in the butler have been recalculated to reflect the final astrometric calibration as part of a data release.
 Prompt products might not be able to have this correction applied.
 
-Lossy-compressed visit images are now expected to be part of a formal data release but difference images are expected to be created on demand.
+Lossy-compressed visit images are now expected to be part of a formal data release but difference images are expected to be created on demand for Data Release 1.
 This makes them effectively unusable in a fast cutout service retrieving light curve images but would not necessarily be a problem for catalog-driven bulk cutouts.
 
 ## Implementation
 
-We will initially consider the time-series cutout to be distinct from the catalog-based cutout (if someone wants time-series cutouts at multiple locations that is simply the catalog-based cutout service with visit images but where the resulting packaging of results might require the user to do some book keeping to put things back together for each coordinates).
+The constraints described in the previous section result in some core requirements for any system that we use to process cutouts:
+
+* We need a discovery layer that can convert a user request to Butler datasets.
+* We potentially need to be able to combine multiple datasets with or without resampling to generate a single cutout (either because of detector boundaries or because the cutout size exceeds the overlap size).
+* We likely will have to eventually support cutouts on "virtual" datasets that need to be generated on demand.
+* We need to be able to realize when multiple cutout requests (from a single catalog) correspond to a single data file so that we can minimize how many times a file is read.
+* We would like to understand the actual WCS for visits when deciding on pixel bounds instead of the approximated FITS-compliant WCS (the new `lsst-images` package does allow this).
+
+We will initially consider the time-series cutout service to be distinct from the catalog-based cutout (if someone wants time-series cutouts at multiple locations that is simply the catalog-based cutout service with visit images but where the resulting packaging of results might require the user to do some book keeping to put things back together for each coordinates).
 
 ### Time-series on-demand
+
+One option that should be considered is to support an on-demand cutout retrieval option for light curves.
+For visualization of light curve images it is not certain that a user will want or need to display every single cutout.
+In this scenario the light curve request would receive a VOTable response containing information about every source (for example the data from the `ForcedSource` table) along with a column corresponding to a DataLinker request for a cutout using the existing SODA cutout service.
+Firefly is able to recognize this form and display a handful of cutouts at a time, updating in near-realtime as the user clicks on specific time stamps.
+This works using the existing cutout infrastructure so long as a cutout can be obtained in a fraction of a second.
 
 A service to return the results in a table with deferred cutouts would need to:
 
@@ -122,8 +191,8 @@ This assumes that these dataset types are part of a data release.
 ### Time-Series cutout
 
 At the end of Data Release 10 the plan is for there to be more than 800 visits to each part of the survey region.
-Deep-drilling fields will have far more visits than that.
-The requirement that a request for this number of cutouts within 10 seconds is very challenging given that it can currently take a few seconds for an RSP user on Google to retrieve a single image from the Butler.
+Deep-drilling fields will have far more visits than that but no more than 50,000.
+The requirement that a request for this number of cutouts within 10 seconds is very challenging given that it can currently take up to a few seconds for an RSP user on Google to retrieve a single image from the Butler, longer if the file is at USDF and is not in the hot storage layer.
 
 A naive version of this service along the lines of:
 
@@ -156,11 +225,13 @@ This would look something like:
 * Make a quantum graph with the known dataset IDs as inputs and with a placeholder for the user-supplied catalog, modifying the graph after creation so it can point at the user catalog location.
 * Submit a BPS job for that graph.
 * Run a special PipelineTask that can read the catalog and select all the positions that are on the current image.
-* Write the cutouts to a single MEF (Butler can do this using the `Stamps` class from `meas_algorithms`).
-* In `finalJob` collect all the output MEF files and repackage them as desired.
+* Write the cutouts to a single file (Butler can do this using the `Stamps` class from `meas_algorithms` but we would want a modified `lsst-images`-compliant model).
+* In `finalJob` collect all the output files and repackage them as desired.
 * Send job completion message back to the server so that the user can retrieve the files.
 
 The bulk service can, in theory, query the job status itself using the normal BPS tooling.
+Ideally we would not want to be rewriting files written by batch, but if we were to do so we could re-partition in HEALpix and balance the file sizes.
+BPS also has the advantage that a RAC external user {cite:p}`RTN-084` could use the BPS interface even before an external service is provided for it.
 
 #### Using Google with Queues
 
@@ -179,26 +250,16 @@ Combining requests from multiple users into a single cutout job would reduce loa
 
 Any Google-based system would need to gather the results from the workers and collect them into the desired response format and write them to the output bucket.
 
-#### Use a Third-party Tool
-
-It is conceivable that if we find that small WCS errors caused from using a SIP approximation are acceptable when doing cutouts, we could make use of an existing cutout tool such as Cutana {cite:p}`2025arXiv251104429G`.
-There would have to be tooling in front of Cutana to convert the user request to something understandable by Cutana given that the Butler would have to be queried to find the locations of the FITS files and assigning cutout requests to each file.
-The source code for Cutana is not yet available to the community so it is not yet clear whether butler could be integrated directly into the software.
-
-For visit requests crossing detector boundaries we would likely have to return multiple cutouts and require the end user deal with any mosaicking.
-
 ## Conclusion
 
-To get some form of cutout service to the computer in the shortest time the plan is:
+To get some form of cutout service to the community in the shortest time the plan is:
 
 1. Develop a on-demand time-series cutout service.
    This will require that we can get the standard cutout service working with sub-second performance.
 2. Develop the time-series service with the cutouts embedded in a FITS binary table.
-3. Implement bulk cutouts using an undecided method.
+3. Implement bulk cutouts using an undecided method, but defaulting to BPS.
 
 ## References
 
 ```{bibliography}
 ```
-
-[^raws]: Cutouts of raw data are likely not useful and so will not be supported (at least initially).
