@@ -94,7 +94,7 @@ When the light-curve cutouts need to be persisted the three baseline options for
 
 1. Multi-Extension FITS (MEF).
 2. Greenbank convention binary tables in FITS {cite}`FITS:GreenBank`.
-3. Extend the [Multimodal Universe](https://github.com/MultimodalUniverse/MultimodalUniverse) {cite}`2024RNAAS...8..301A` HDF5 data model to allow for light-curve cutouts and consider providing a Zarr {cite:p}`10.5281/zenodo.3773449` variant.[^mmparquet]
+3. Extend the [Multimodal Universe](https://github.com/MultimodalUniverse/MultimodalUniverse) {cite}`2024RNAAS...8..301A` data model to allow for light-curve cutouts.[^mmparquet]
 
 [^mmparquet]: It seems like Multimodal Universe might be moving to Parquet format (using HATS), so this may affect future choices.
 
@@ -111,10 +111,11 @@ MEF is well supported in display tools for looking at individual images and you 
 File access of multiple cutouts is not efficient and tooling has to understand how to group each extension based on the `EXTVER` and `EXTNAME` FITS headers.
 For small numbers of cutouts this format is acceptable.
 
-##### HDF5 or Zarr
+##### Multi-dimensional Arrays
 
-An alternative to using FITS is to store the binary data as large n-dimensional arrays using a common format such as HDF5 or Zarr.{cite:p}`10.5281/zenodo.3773449`
-This would require us to investigate existing data models since these formats are not common within astronomy.
+An alternative to using FITS is to store the binary data as large n-dimensional arrays using a common format such as FITS, HDF5 or Zarr.{cite:p}`10.5281/zenodo.3773449`
+This would require us to investigate existing data models since some of these formats are not common within astronomy.
+One advantage of using N-D arrays is that standards like FITS compression become available in an efficient way.
 
 ##### Greenbank Convention Binary Tables
 
@@ -122,6 +123,8 @@ The Greenbank convention {cite}`FITS:GreenBank` stores cutouts in FITS binary ta
 This has the advantage that the image can be embedded with the associated source information, assuming that the user specified a source/object ID and not a position.
 This convention has some issues with SIP WCS with many parameters and we might be required to extend the registered convention unless we recalculated the WCS for the smaller area.
 We need to investigate how many rows can be stored in one of these files before they become too large to be used efficiently, and we need to understand the current situation with tooling that understands how to read and display these files.
+An additional problem is that storing 2-D pixel data in a binary table results in no ability to use compression.
+Also, FITS binary tables use row storage and not column storage so there is no efficient way to extract all the pixel data.
 
 ##### Multimodal Universe Parquet
 
@@ -132,6 +135,7 @@ Recently they switched to Parquet format using HATS partitioning {cite:p}`IVOAHA
 They currently have datasets from HSC which provides some guidance for how we should layout our files and what metadata columns are expected, but they do not have any light-curve examples that include cutouts (the light-curve examples are using catalog photometry data).
 Nevertheless, it seems like there is a straightforward way to combine the HSC approach with the DES/PS1 light-curve approach (one file per light-curve).
 We would have to clarify whether there is an expectation that each cutout would be resampled into the same WCS grid.
+There is also the issue that none of the standard column compression algorithms for Parquet work well with floating point images so there will not be much compression available.
 
 #### Catalog Cutout Data
 
@@ -180,7 +184,7 @@ It may be prudent to disallow this in the first version and return individual cu
 There is an implicit assumption that the visit/detector regions defined in the butler have been recalculated to reflect the final astrometric calibration as part of a data release.
 Prompt products might not be able to have this correction applied.
 
-Lossy-compressed visit images are now expected to be part of a formal data release but difference images are expected to be created on demand.
+Lossy-compressed visit images are now expected to be part of a formal data release but difference images are expected to be created on demand for Data Release 1.
 This makes them effectively unusable in a fast cutout service retrieving light curve images but would not necessarily be a problem for catalog-driven bulk cutouts.
 
 ## Implementation
